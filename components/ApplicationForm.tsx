@@ -1,50 +1,39 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import type { FormData, FormFiles, FormErrors } from '../types';
+import type { FormData, FormFiles } from '../types';
 import ProgressBar from './ProgressBar';
 
-/**
- * Securely uploads a file by first requesting a pre-signed URL from the backend (Netlify Function),
- * then uploading the file directly to Cloudflare R2 using that URL.
- * @param file The file to upload.
- * @returns A promise that resolves with the unique key of the uploaded file in the R2 bucket.
- */
-const uploadFile = async (file: File): Promise<string> => {
-    // Step 1: Request a secure, pre-signed upload URL from our Netlify Function.
-    const presignResponse = await fetch('/.netlify/functions/generate-upload-url', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-            filename: file.name,
-            contentType: file.type,
-        }),
-    });
+// All backend and submission functionality has been removed.
+// This is a UI-only component for demonstration purposes.
 
-    if (!presignResponse.ok) {
-        const errorText = await presignResponse.text();
-        throw new Error(`Failed to get pre-signed URL: ${errorText}`);
-    }
+const InputField = ({ name, label, value, onChange, type = 'text', required = true, ...props }) => (
+    <div>
+        <label htmlFor={name} className="block text-sm font-medium text-slate-700 mb-1">{label}{required && <span className="text-red-500">*</span>}</label>
+        <input
+            id={name}
+            name={name}
+            type={type}
+            value={value}
+            onChange={onChange}
+            className="w-full px-3 py-2 border rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 border-slate-300"
+            {...props}
+        />
+    </div>
+);
 
-    const { url, key } = await presignResponse.json();
-
-    // Step 2: Upload the file directly to the Cloudflare R2 bucket using the pre-signed URL.
-    const uploadResponse = await fetch(url, {
-        method: 'PUT',
-        body: file,
-        headers: {
-            'Content-Type': file.type,
-        },
-    });
-
-    if (!uploadResponse.ok) {
-        throw new Error(`File upload failed for ${file.name}.`);
-    }
-
-    // Step 3: Return the unique key of the file, which can be stored in a database.
-    console.log(`Successfully uploaded ${file.name}. Key: ${key}`);
-    return key;
-};
+const FileInputField = ({ name, label, onChange, accept, multiple = false, required = true }) => (
+    <div>
+        <label htmlFor={name} className="block text-sm font-medium text-slate-700 mb-1">{label}{required && <span className="text-red-500">*</span>}</label>
+        <input
+            id={name}
+            name={name}
+            type="file"
+            onChange={onChange}
+            accept={accept}
+            multiple={multiple}
+            className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+        />
+    </div>
+);
 
 
 const ApplicationForm: React.FC = () => {
@@ -68,13 +57,10 @@ const ApplicationForm: React.FC = () => {
         workplacePhoto: null,
     });
 
-    const [errors, setErrors] = useState<FormErrors>({});
     const [progress, setProgress] = useState(0);
-    const [submissionStatus, setSubmissionStatus] = useState<'idle' | 'uploading' | 'success' | 'error'>('idle');
 
     const calculateProgress = useCallback(() => {
         let completedFields = 0;
-        
         const isCompleted = (value: any) => {
             if (typeof value === 'string') return value.trim() !== '';
             if (typeof value === 'boolean') return value === true;
@@ -103,9 +89,8 @@ const ApplicationForm: React.FC = () => {
         if (files.additionalPhotos.length > 0) completedFields++;
         if (files.workplacePhoto) completedFields++;
 
-        setProgress((completedFields / totalFields) * 100);
+        setProgress(Math.round((completedFields / totalFields) * 100));
     }, [formData, files]);
-
 
     useEffect(() => {
         calculateProgress();
@@ -120,10 +105,6 @@ const ApplicationForm: React.FC = () => {
         } else {
             setFormData(prev => ({ ...prev, [name]: value }));
         }
-
-        if (errors[name]) {
-            setErrors(prev => ({ ...prev, [name]: undefined }));
-        }
     };
     
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -136,209 +117,75 @@ const ApplicationForm: React.FC = () => {
             }
         }
     };
-
-    const validateForm = (): boolean => {
-        const newErrors: FormErrors = {};
-        if (!formData.name.trim()) newErrors.name = "Name is required";
-        if (!formData.dob) newErrors.dob = "Date of birth is required";
-        if (!formData.mobile.match(/^[0-9]{10}$/)) newErrors.mobile = "Enter a valid 10-digit mobile number";
-        if (!formData.email.match(/^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$/)) newErrors.email = "Enter a valid email address";
-        if (!formData.expectedSalary) newErrors.expectedSalary = "Expected salary is required";
-        if (!formData.bio.trim() || formData.bio.length < 50) newErrors.bio = "Bio must be at least 50 characters";
-        if (!formData.comfortableTraveling) newErrors.comfortableTraveling = "This field is required";
-        if (!formData.hasRestrictions) newErrors.hasRestrictions = "This field is required";
-        if (formData.hasRestrictions === 'Yes' && !formData.restrictionsReason.trim()) newErrors.restrictionsReason = "Please provide an explanation";
-        if (!files.cv) newErrors.cv = "CV is required";
-        if (!files.passportPhoto) newErrors.passportPhoto = "Passport photo is required";
-        if (files.additionalPhotos.length < 2) newErrors.additionalPhotos = "At least two additional photos are required";
-        if (!files.workplacePhoto) newErrors.workplacePhoto = "Workplace photo is required";
-        if (!formData.agreement) newErrors.agreement = "You must agree to the terms";
-
-        setErrors(newErrors);
-        return Object.keys(newErrors).length === 0;
-    };
-
-    const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
-        e.preventDefault();
-        if (submissionStatus === 'uploading' || submissionStatus === 'success') {
-            return;
-        }
-
-        if (!validateForm()) {
-            console.log("Form validation failed", errors);
-            alert('Please fill out all required fields correctly.');
-            return;
-        }
-
-        setSubmissionStatus('uploading');
-
-        try {
-            const [cvKey, passportPhotoKey, workplacePhotoKey, additionalPhotosKeys] = await Promise.all([
-                files.cv ? uploadFile(files.cv) : Promise.resolve(null),
-                files.passportPhoto ? uploadFile(files.passportPhoto) : Promise.resolve(null),
-                files.workplacePhoto ? uploadFile(files.workplacePhoto) : Promise.resolve(null),
-                Promise.all(files.additionalPhotos.map(file => uploadFile(file))),
-            ]);
-
-            const submissionData = {
-                ...formData,
-                files: {
-                    cv: cvKey,
-                    passportPhoto: passportPhotoKey,
-                    workplacePhoto: workplacePhotoKey,
-                    additionalPhotos: additionalPhotosKeys,
-                }
-            };
-            
-            // This is where you would send `submissionData` to your main backend
-            // to be stored in a database.
-            console.log("Form Submitted Successfully!");
-            console.log("This data (with file keys) should be sent to your backend:", submissionData);
-
-            setSubmissionStatus('success');
-            alert('Application submitted successfully!');
-
-        } catch (error) {
-            console.error("Submission failed due to upload error:", error);
-            setSubmissionStatus('error');
-            alert(`There was an error uploading your files: ${error instanceof Error ? error.message : 'Unknown error'}. Please try again.`);
-        }
-    };
-
-    const isSubmittable =
-        !!formData.name.trim() &&
-        !!formData.dob &&
-        !!formData.mobile.trim() &&
-        !!formData.email.trim() &&
-        !!formData.expectedSalary &&
-        formData.bio.trim().length >= 50 &&
-        !!formData.comfortableTraveling &&
-        !!formData.hasRestrictions &&
-        (formData.hasRestrictions === 'No' || (formData.hasRestrictions === 'Yes' && !!formData.restrictionsReason.trim())) &&
-        !!files.cv &&
-        !!files.passportPhoto &&
-        files.additionalPhotos.length >= 2 &&
-        !!files.workplacePhoto &&
-        formData.agreement;
-
-    const FileInput = ({ name, label, multiple = false, error }: { name: keyof FormFiles, label: string, multiple?: boolean, error?: string }) => (
-        <div className="flex flex-col">
-            <label htmlFor={name} className="mb-1 font-medium text-slate-700">{label}<span className="text-red-500 ml-1">*</span></label>
-            <input
-                id={name}
-                name={name}
-                type="file"
-                multiple={multiple}
-                onChange={handleFileChange}
-                disabled={submissionStatus === 'uploading' || submissionStatus === 'success'}
-                className={`file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 text-slate-500 text-sm disabled:opacity-50 ${error ? 'border-red-500' : 'border-slate-300'}`}
-            />
-            {error && <p className="text-red-500 text-sm mt-1">{error}</p>}
-        </div>
-    );
     
     return (
         <section>
-             <h2 className="text-xl font-bold text-slate-800 border-b-2 border-slate-200 pb-2 mb-4">Application Form</h2>
-             <p className="text-sm text-slate-500 mb-2">Completion Progress</p>
-             <ProgressBar progress={progress} />
-             <form onSubmit={handleSubmit} className="space-y-6 mt-6" noValidate>
-                <fieldset disabled={submissionStatus === 'uploading' || submissionStatus === 'success'} className="space-y-6">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <div>
-                            <label htmlFor="name" className="block text-sm font-medium text-slate-700">Name<span className="text-red-500 ml-1">*</span></label>
-                            <input type="text" name="name" id="name" value={formData.name} onChange={handleChange} required className={`mt-1 block w-full rounded-md border-2 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-white text-black ${errors.name ? 'border-red-500' : 'border-slate-300'}`} />
-                            {errors.name && <p className="text-red-500 text-sm mt-1">{errors.name}</p>}
-                        </div>
-                         <div>
-                            <label htmlFor="dob" className="block text-sm font-medium text-slate-700">Date of birth<span className="text-red-500 ml-1">*</span></label>
-                            <input type="date" name="dob" id="dob" value={formData.dob} onChange={handleChange} required className={`mt-1 block w-full rounded-md border-2 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-white text-black ${errors.dob ? 'border-red-500' : 'border-slate-300'}`} />
-                            {errors.dob && <p className="text-red-500 text-sm mt-1">{errors.dob}</p>}
-                        </div>
-                         <div>
-                            <label htmlFor="mobile" className="block text-sm font-medium text-slate-700">Mobile Number<span className="text-red-500 ml-1">*</span></label>
-                            <input type="tel" name="mobile" id="mobile" value={formData.mobile} onChange={handleChange} required className={`mt-1 block w-full rounded-md border-2 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-white text-black ${errors.mobile ? 'border-red-500' : 'border-slate-300'}`} />
-                             {errors.mobile && <p className="text-red-500 text-sm mt-1">{errors.mobile}</p>}
-                        </div>
-                         <div>
-                            <label htmlFor="email" className="block text-sm font-medium text-slate-700">Email Id<span className="text-red-500 ml-1">*</span></label>
-                            <input type="email" name="email" id="email" value={formData.email} onChange={handleChange} required className={`mt-1 block w-full rounded-md border-2 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-white text-black ${errors.email ? 'border-red-500' : 'border-slate-300'}`} />
-                            {errors.email && <p className="text-red-500 text-sm mt-1">{errors.email}</p>}
-                        </div>
-                         <div>
-                            <label htmlFor="expectedSalary" className="block text-sm font-medium text-slate-700">Expected Salary (Monthly)<span className="text-red-500 ml-1">*</span></label>
-                            <input type="number" name="expectedSalary" id="expectedSalary" value={formData.expectedSalary} onChange={handleChange} required className={`mt-1 block w-full rounded-md border-2 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-white text-black ${errors.expectedSalary ? 'border-red-500' : 'border-slate-300'}`} />
-                            {errors.expectedSalary && <p className="text-red-500 text-sm mt-1">{errors.expectedSalary}</p>}
-                        </div>
-                    </div>
-                     <div>
-                        <label htmlFor="bio" className="block text-sm font-medium text-slate-700">A bio About You (min. 50 characters)<span className="text-red-500 ml-1">*</span></label>
-                        <textarea name="bio" id="bio" rows={4} value={formData.bio} onChange={handleChange} required className={`mt-1 block w-full rounded-md border-2 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-white text-black ${errors.bio ? 'border-red-500' : 'border-slate-300'}`}></textarea>
-                        {errors.bio && <p className="text-red-500 text-sm mt-1">{errors.bio}</p>}
-                    </div>
-                    
-                     <div>
-                        <p className="text-sm font-medium text-slate-700">Are you comfortable traveling with Managing Director once or twice a month if needed?<span className="text-red-500 ml-1">*</span></p>
-                        <div className="mt-2 space-x-4">
-                            <label className="inline-flex items-center"><input type="radio" name="comfortableTraveling" value="Yes" checked={formData.comfortableTraveling === 'Yes'} onChange={handleChange} className="focus:ring-blue-500 h-4 w-4 text-blue-600 border-slate-300" /> <span className="ml-2">Yes</span></label>
-                            <label className="inline-flex items-center"><input type="radio" name="comfortableTraveling" value="No" checked={formData.comfortableTraveling === 'No'} onChange={handleChange} className="focus:ring-blue-500 h-4 w-4 text-blue-600 border-slate-300" /> <span className="ml-2">No</span></label>
-                        </div>
-                         {errors.comfortableTraveling && <p className="text-red-500 text-sm mt-1">{errors.comfortableTraveling}</p>}
-                    </div>
-                    
-                    <div>
-                         <label htmlFor="hasRestrictions" className="block text-sm font-medium text-slate-700">Do you have any family or personal restrictions that may limit occasional travel?<span className="text-red-500 ml-1">*</span></label>
-                         <select name="hasRestrictions" id="hasRestrictions" value={formData.hasRestrictions} onChange={handleChange} className={`mt-1 block w-full rounded-md border-2 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-white text-black ${errors.hasRestrictions ? 'border-red-500' : 'border-slate-300'}`}>
-                            <option value="">Select an option</option>
-                            <option value="Yes">Yes</option>
-                            <option value="No">No</option>
-                        </select>
-                        {errors.hasRestrictions && <p className="text-red-500 text-sm mt-1">{errors.hasRestrictions}</p>}
-                    </div>
-                    
-                    {formData.hasRestrictions === 'Yes' && (
-                        <div>
-                            <label htmlFor="restrictionsReason" className="block text-sm font-medium text-slate-700">Please explain<span className="text-red-500 ml-1">*</span></label>
-                            <textarea name="restrictionsReason" id="restrictionsReason" rows={3} value={formData.restrictionsReason} onChange={handleChange} className={`mt-1 block w-full rounded-md border-2 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm bg-white text-black ${errors.restrictionsReason ? 'border-red-500' : 'border-slate-300'}`}></textarea>
-                            {errors.restrictionsReason && <p className="text-red-500 text-sm mt-1">{errors.restrictionsReason}</p>}
-                        </div>
-                    )}
-                    
-                    <div className="space-y-4 p-4 border border-slate-200 rounded-lg">
-                         <h3 className="text-lg font-medium text-slate-800">Uploads</h3>
-                         <FileInput name="cv" label="Upload CV" error={errors.cv} />
-                         <FileInput name="passportPhoto" label="Upload a Passport size photo" error={errors.passportPhoto} />
-                         <FileInput name="additionalPhotos" label="Upload any two additional recent photos" multiple={true} error={errors.additionalPhotos}/>
-                         <FileInput name="workplacePhoto" label="Upload Workplace or professional look" error={errors.workplacePhoto}/>
-                    </div>
+            <h2 className="text-xl font-bold text-slate-800 border-b-2 border-slate-200 pb-2 mb-6">Application Form</h2>
+            
+            <div className="mb-6">
+                <p className="text-sm text-slate-600 mb-2">Form Completion</p>
+                <ProgressBar progress={progress} />
+            </div>
 
-                    <div className="flex items-start">
-                        <div className="flex items-center h-5">
-                            <input id="agreement" name="agreement" type="checkbox" checked={formData.agreement} onChange={handleChange} className="focus:ring-blue-500 h-4 w-4 text-blue-600 border-slate-300 rounded" />
-                        </div>
-                        <div className="ml-3 text-sm">
-                            <label htmlFor="agreement" className="font-medium text-slate-700">I agree to the terms and conditions<span className="text-red-500 ml-1">*</span></label>
-                            {errors.agreement && <p className="text-red-500 text-sm">{errors.agreement}</p>}
-                        </div>
-                    </div>
-                </fieldset>
+            <form noValidate className="space-y-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <InputField name="name" label="Full Name" value={formData.name} onChange={handleChange} />
+                    <InputField name="dob" label="Date of Birth" type="date" value={formData.dob} onChange={handleChange} />
+                    <InputField name="mobile" label="Mobile Number" type="tel" value={formData.mobile} onChange={handleChange} />
+                    <InputField name="email" label="Email Address" type="email" value={formData.email} onChange={handleChange} />
+                    <InputField name="expectedSalary" label="Expected Salary (per month)" value={formData.expectedSalary} onChange={handleChange} />
+                </div>
 
                 <div>
-                    <button type="submit" disabled={!isSubmittable || submissionStatus === 'uploading' || submissionStatus === 'success'} className="w-full flex justify-center items-center py-3 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:bg-slate-400 disabled:cursor-not-allowed transition-colors">
-                        {submissionStatus === 'uploading' && (
-                            <>
-                                <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                                </svg>
-                                Uploading...
-                            </>
-                        )}
-                        {submissionStatus === 'idle' && 'Submit Application'}
-                        {submissionStatus === 'success' && 'Application Submitted!'}
-                        {submissionStatus === 'error' && 'Submission Failed - Retry'}
+                    <label htmlFor="bio" className="block text-sm font-medium text-slate-700 mb-1">About Yourself <span className="text-red-500">*</span></label>
+                    <textarea id="bio" name="bio" rows={4} value={formData.bio} onChange={handleChange} className="w-full px-3 py-2 border rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 border-slate-300" placeholder="Tell us about yourself, your skills, and why you are a good fit for this role (min. 50 characters)."></textarea>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                     <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-2">Are you comfortable with occasional travel? <span className="text-red-500">*</span></label>
+                        <div className="flex gap-4">
+                           <label className="flex items-center"><input type="radio" name="comfortableTraveling" value="Yes" checked={formData.comfortableTraveling === 'Yes'} onChange={handleChange} className="mr-2" /> Yes</label>
+                           <label className="flex items-center"><input type="radio" name="comfortableTraveling" value="No" checked={formData.comfortableTraveling === 'No'} onChange={handleChange} className="mr-2" /> No</label>
+                        </div>
+                    </div>
+                     <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-2">Do you have any restrictions? <span className="text-red-500">*</span></label>
+                         <div className="flex gap-4">
+                           <label className="flex items-center"><input type="radio" name="hasRestrictions" value="Yes" checked={formData.hasRestrictions === 'Yes'} onChange={handleChange} className="mr-2" /> Yes</label>
+                           <label className="flex items-center"><input type="radio" name="hasRestrictions" value="No" checked={formData.hasRestrictions === 'No'} onChange={handleChange} className="mr-2" /> No</label>
+                        </div>
+                    </div>
+                </div>
+                
+                {formData.hasRestrictions === 'Yes' && (
+                    <div>
+                         <label htmlFor="restrictionsReason" className="block text-sm font-medium text-slate-700 mb-1">Reason for Restrictions <span className="text-red-500">*</span></label>
+                        <textarea id="restrictionsReason" name="restrictionsReason" rows={2} value={formData.restrictionsReason} onChange={handleChange} className="w-full px-3 py-2 border rounded-md shadow-sm border-slate-300" placeholder="Please explain your restrictions."></textarea>
+                    </div>
+                )}
+                
+                <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 space-y-4">
+                    <p className="text-sm font-medium text-slate-700">Please upload the following documents. <span className="font-normal text-slate-500">(Max file size: 35 KB each)</span></p>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <FileInputField name="cv" label="CV / Resume" onChange={handleFileChange} accept=".pdf,.doc,.docx" />
+                        <FileInputField name="passportPhoto" label="Passport Size Photo" onChange={handleFileChange} accept="image/*" />
+                        <FileInputField name="additionalPhotos" label="Additional Photos (3-4)" onChange={handleFileChange} accept="image/*" multiple={true} />
+                        <FileInputField name="workplacePhoto" label="Your Workplace Photo" onChange={handleFileChange} accept="image/*" />
+                    </div>
+                </div>
+
+                <div>
+                    <label className="flex items-start">
+                        <input type="checkbox" name="agreement" checked={formData.agreement} onChange={handleChange} className="mt-1 h-4 w-4 text-blue-600 border-slate-300 rounded focus:ring-blue-500" />
+                        <span className="ml-2 text-sm text-slate-600">I hereby declare that all the information provided in this application form is true and correct to the best of my knowledge. <span className="text-red-500">*</span></span>
+                    </label>
+                </div>
+
+                <div className="pt-4">
+                    <button type="button" disabled className="w-full bg-slate-400 text-white font-bold py-3 px-4 rounded-lg cursor-not-allowed">
+                        Submit (Functionality Disabled)
                     </button>
-                    {submissionStatus === 'error' && <p className="text-red-500 text-sm mt-2 text-center">An error occurred during upload. Please try again.</p>}
                 </div>
             </form>
         </section>

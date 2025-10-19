@@ -1,10 +1,7 @@
 {
   "name": "job-application-form",
   "version": "1.0.0",
-  "description": "Job application form with secure file uploads",
+  "description": "Job application form with Google Sheets and Apps Script integration",
   "private": true,
-  "dependencies": {
-    "@aws-sdk/client-s3": "^3.583.0",
-    "@aws-sdk/s3-request-presigner": "^3.583.0"
-  }
+  "dependencies": {}
 }

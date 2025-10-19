@@ -1,23 +1,48 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import type { FormData, FormFiles, FormErrors } from '../types';
 import ProgressBar from './ProgressBar';
-// NOTE: The S3 client and direct upload functionality have been removed.
-// Storing credentials and managing uploads directly from the client-side is insecure.
-// This has been replaced with a mock function to simulate the upload process.
-// For a production application, use a backend service to generate pre-signed URLs for secure uploads.
 
 /**
- * Simulates uploading a file to a cloud storage service.
- * In a real application, this would be replaced by a secure upload mechanism.
- * @param file The file to "upload".
- * @returns A promise that resolves with a mock file key.
+ * Securely uploads a file by first requesting a pre-signed URL from the backend (Netlify Function),
+ * then uploading the file directly to Cloudflare R2 using that URL.
+ * @param file The file to upload.
+ * @returns A promise that resolves with the unique key of the uploaded file in the R2 bucket.
  */
-const mockUploadFile = async (file: File): Promise<string> => {
-    // Simulate a network delay to mimic a real upload.
-    await new Promise(resolve => setTimeout(resolve, 500 + Math.random() * 1000));
-    
-    const key = `mock-uploads/${Date.now()}-${file.name.replace(/\s/g, '_')}`;
-    console.log(`Mock upload successful for ${file.name}. Key: ${key}`);
+const uploadFile = async (file: File): Promise<string> => {
+    // Step 1: Request a secure, pre-signed upload URL from our Netlify Function.
+    const presignResponse = await fetch('/.netlify/functions/generate-upload-url', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            filename: file.name,
+            contentType: file.type,
+        }),
+    });
+
+    if (!presignResponse.ok) {
+        const errorText = await presignResponse.text();
+        throw new Error(`Failed to get pre-signed URL: ${errorText}`);
+    }
+
+    const { url, key } = await presignResponse.json();
+
+    // Step 2: Upload the file directly to the Cloudflare R2 bucket using the pre-signed URL.
+    const uploadResponse = await fetch(url, {
+        method: 'PUT',
+        body: file,
+        headers: {
+            'Content-Type': file.type,
+        },
+    });
+
+    if (!uploadResponse.ok) {
+        throw new Error(`File upload failed for ${file.name}.`);
+    }
+
+    // Step 3: Return the unique key of the file, which can be stored in a database.
+    console.log(`Successfully uploaded ${file.name}. Key: ${key}`);
     return key;
 };
 
@@ -149,10 +174,10 @@ const ApplicationForm: React.FC = () => {
 
         try {
             const [cvKey, passportPhotoKey, workplacePhotoKey, additionalPhotosKeys] = await Promise.all([
-                files.cv ? mockUploadFile(files.cv) : Promise.resolve(null),
-                files.passportPhoto ? mockUploadFile(files.passportPhoto) : Promise.resolve(null),
-                files.workplacePhoto ? mockUploadFile(files.workplacePhoto) : Promise.resolve(null),
-                Promise.all(files.additionalPhotos.map(file => mockUploadFile(file))),
+                files.cv ? uploadFile(files.cv) : Promise.resolve(null),
+                files.passportPhoto ? uploadFile(files.passportPhoto) : Promise.resolve(null),
+                files.workplacePhoto ? uploadFile(files.workplacePhoto) : Promise.resolve(null),
+                Promise.all(files.additionalPhotos.map(file => uploadFile(file))),
             ]);
 
             const submissionData = {
@@ -165,16 +190,18 @@ const ApplicationForm: React.FC = () => {
                 }
             };
             
+            // This is where you would send `submissionData` to your main backend
+            // to be stored in a database.
             console.log("Form Submitted Successfully!");
-            console.log("This data (with mock file keys) would now be sent to your backend:", submissionData);
+            console.log("This data (with file keys) should be sent to your backend:", submissionData);
 
             setSubmissionStatus('success');
             alert('Application submitted successfully!');
 
         } catch (error) {
-            console.error("Submission failed due to mock upload error", error);
+            console.error("Submission failed due to upload error:", error);
             setSubmissionStatus('error');
-            alert('There was an error uploading your files. Please try again.');
+            alert(`There was an error uploading your files: ${error instanceof Error ? error.message : 'Unknown error'}. Please try again.`);
         }
     };
 

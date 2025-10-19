@@ -10,7 +10,8 @@
   },
   "dependencies": {
     "react": "^19.2.0",
-    "react-dom": "^19.2.0"
+    "react-dom": "^19.2.0",
+    "@aws-sdk/client-s3": "latest"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",
